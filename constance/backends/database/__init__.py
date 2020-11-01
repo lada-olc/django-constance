@@ -3,6 +3,7 @@ from django.core.cache.backends.locmem import LocMemCache
 from django.core.exceptions import ImproperlyConfigured
 from django.db import OperationalError, ProgrammingError
 from django.db.models.signals import post_save
+from sentry_sdk import capture_exception
 
 from .. import Backend
 from ... import settings, signals, config
@@ -73,8 +74,8 @@ class DatabaseBackend(Backend):
         if value is None:
             try:
                 value = self._model._default_manager.get(key=key).value
-            except (OperationalError, ProgrammingError, self._model.DoesNotExist):
-                pass
+            except (self._model.DoesNotExist) as e:
+                capture_exception(e)
             else:
                 if self._cache:
                     self._cache.add(key, value)
@@ -83,13 +84,9 @@ class DatabaseBackend(Backend):
     def set(self, key, value):
         old_value = self.get(key)
 
-        try:
-            constance, created = self._model._default_manager.get_or_create(
-                key=self.add_prefix(key), defaults={'value': value}
-            )
-        except (OperationalError, ProgrammingError):
-            # database is not created, noop
-            return
+        constance, created = self._model._default_manager.get_or_create(
+            key=self.add_prefix(key), defaults={'value': value}
+        )
 
         if not created:
             constance.value = value
